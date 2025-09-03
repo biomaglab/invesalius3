@@ -18,10 +18,11 @@
 # --------------------------------------------------------------------------
 
 import time
+import serial
+import threading
+import wx
 from functools import partial
 from threading import Thread
-
-import wx
 
 import invesalius.constants as const
 from invesalius.pubsub import pub as Publisher
@@ -40,7 +41,12 @@ class PedalConnector:
     """
 
     def __init__(self, neuronavigation_api=None, window=None):
-        self.pedal_connection = MidiPedal() if HAS_PEDAL_CONNECTION else None
+        self.pedal_connection = SerialPedal(port='COM3')
+        #self.pedal_connection.add_callback("teste", lambda state: print("Pedal pressed" if state else "Pedal released"))
+
+        if not self.pedal_connection.is_alive():
+            self.pedal_connection.start()
+
         self.neuronavigation_api = neuronavigation_api
         self.frame = None
 
@@ -195,3 +201,51 @@ class MidiPedal(Thread, metaclass=Singleton):
             self._check_disconnected()
             self._connect_if_disconnected()
             time.sleep(1.0)
+
+
+class SerialPedal(threading.Thread, metaclass=Singleton):
+    def __init__(self, port, baudrate=9600):
+        super().__init__()
+        self.daemon = True
+        self.port = port
+        self.baudrate = baudrate
+        self.serial = None
+        self._callback_infos = []
+
+    def add_callback(self, name, callback, remove_when_released=False):
+        self._callback_infos.append({
+            "name": name,
+            "callback": callback,
+            "remove_when_released": remove_when_released
+        })
+
+    def remove_callback(self, name):
+        self._callback_infos = [cb for cb in self._callback_infos if cb["name"] != name]
+
+    def _handle_state(self, state):
+        Publisher.sendMessage("Pedal state changed", state=state)
+        for cb in self._callback_infos:
+            cb["callback"](state)
+        if not state:
+            self._callback_infos = [
+                cb for cb in self._callback_infos if not cb["remove_when_released"]
+            ]
+
+    def run(self):
+        try:
+            self.serial = serial.Serial(self.port, self.baudrate)
+            print(f"[SerialPedal] Conected to port {self.port}")
+        except serial.SerialException as e:
+            print(f"[SerialPedal] Fail to connect: {e}")
+            return
+
+        while True:
+            try:
+                line = self.serial.readline().decode().strip()
+                if line == "PRESSED":
+                    self._handle_state(True)
+                elif line == "RELEASED":
+                    self._handle_state(False)
+            except Exception as e:
+                print(f"[SerialPedal] Erro: {e}")
+                break

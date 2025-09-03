@@ -1587,6 +1587,8 @@ class StylusPage(wx.Panel):
         wx.Panel.__init__(self, parent)
         self.navigation = nav_hub.navigation
         self.tracker = nav_hub.tracker
+        self.pedal_connector = nav_hub.pedal_connector
+
 
         border = wx.FlexGridSizer(1, 3, 5)
         self.border = border
@@ -1613,6 +1615,15 @@ class StylusPage(wx.Panel):
         btn_rec.Bind(wx.EVT_BUTTON, self.onRecord)
 
         self.btn_rec = btn_rec
+
+        if self.pedal_connector:
+            def set_stylus_callback(state):
+                if state:
+                    wx.CallAfter(self.onRecord, None)
+
+            self.pedal_connector.add_callback(
+                "stylus_record", set_stylus_callback, remove_when_released=False
+            )
 
         self.border.AddMany(
             [
@@ -1678,10 +1689,16 @@ class StylusPage(wx.Panel):
         else:
             wx.MessageBox(_("Probe or head not visible to tracker!"), _("InVesalius 3"))
 
+    def StopStylusRecording(self):
+        if self.pedal_connector:
+            self.pedal_connector.remove_callback("stylus_record")
+
     def OnBack(self, evt):
+        self.StopStylusRecording()
         Publisher.sendMessage("Move to refine page")
 
     def OnNext(self, evt):
+        self.StopStylusRecording()
         Publisher.sendMessage("Move to stimulator page")
 
 
